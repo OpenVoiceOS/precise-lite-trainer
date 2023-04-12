@@ -17,6 +17,7 @@ from math import exp
 from os.path import splitext, isfile
 from pprint import pprint
 from typing import Tuple
+import datetime
 
 import numpy as np
 import tensorflow as tf  # Using tensorflow v2.2
@@ -59,7 +60,9 @@ class PreciseTrainer:
     """
 
     def __init__(self, model, folder, model_params=None, epochs=50, batch_size=512,
-                 save_best=True, no_validation=False, metric_monitor="loss"):
+                 save_best=True, no_validation=False, metric_monitor="loss",
+                 log_dir="logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+                 ):
 
         model_params = model_params or ModelParams(skip_acc=no_validation, extra_metrics=False,
                                                    loss_bias=0.8, freeze_till=0)
@@ -88,9 +91,6 @@ class PreciseTrainer:
 
         self.samples = set()
         self.hash_to_ind = {}
-
-        import datetime
-        log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
         self.callbacks = [
             checkpoint,
@@ -294,12 +294,15 @@ if __name__ == "__main__":
         raise ValueError('sensitivity must be between 0.0 and 1.0')
     params = ModelParams(skip_acc=no_validation, extra_metrics=extra_metrics,
                          loss_bias=1.0 - sensitivity, freeze_till=freeze_till)
+    model_name = "male_ww"
+    folder = "/tmp/male_ww"
+    model_path = f"/home/miro/PycharmProjects/ovos-audio-classifiers/trained/{model_name}"
+    log_dir = f"logs/fit/{model_name}/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
-    folder = "/home/miro/PycharmProjects/ovos-audio-classifiers/test/dataset_converted"
-    model_path = "/home/miro/PycharmProjects/ovos-audio-classifiers/test/my_model"
-    lite_n = "/home/miro/PycharmProjects/ovos-audio-classifiers/my_model.tflite"
-    trainer = PreciseTrainer(model_path, folder, epochs=20)
-    model_file = trainer.train_optimized(cycles=10)
-    trainer.train_epochs = 1000
+    trainer = PreciseTrainer(model_path, folder, epochs=100, log_dir=log_dir)
+    # look for best hyperparams during a few cycles
+    # model_file = trainer.train_optimized(cycles=20)
+    # train the best model for more epochs
+    #trainer.train_epochs = 5000
     model_file = trainer.train()
     trainer.test(model_file, folder)
