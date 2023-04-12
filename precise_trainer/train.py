@@ -199,9 +199,9 @@ class PreciseTrainer:
             bb.maximize(fitness)
             pprint(bb.get_current_run())
 
-        self.model = bb.get_optimal_run()
-        print("\n= BEST = (example #%d)" % bb.get_data()["examples"].index(self.model))
-        pprint(self.model)
+        best = bb.get_optimal_run()
+        print("\n= BEST = (example #%d)" % bb.get_data()["examples"].index(best))
+        pprint(best)
         if convert:
             return self.convert(self.path, f"{self.path}/model.tflite")
         else:
@@ -298,7 +298,8 @@ if __name__ == "__main__":
     folder = "/home/miro/PycharmProjects/ovos-audio-classifiers/test/dataset_converted"
     model_path = "/home/miro/PycharmProjects/ovos-audio-classifiers/test/my_model"
     lite_n = "/home/miro/PycharmProjects/ovos-audio-classifiers/my_model.tflite"
-    trainer = PreciseTrainer(model_path, folder, epochs=500)
-    model_file = trainer.train_optimized(cycles=50)
-    # model_file = trainer.train()
+    trainer = PreciseTrainer(model_path, folder, epochs=20)
+    model_file = trainer.train_optimized(cycles=10)
+    trainer.train_epochs = 1000
+    model_file = trainer.train()
     trainer.test(model_file, folder)

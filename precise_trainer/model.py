@@ -17,7 +17,7 @@ from typing import *
 
 from keras.layers import Dense, GRU
 from keras.models import Sequential, load_model
-from precise_lite_runner.params import params
+from precise_lite_runner.params import ListenerParams
 
 from precise_trainer.functions import false_pos, false_neg, \
     weighted_log_loss, set_loss_bias
@@ -67,7 +67,7 @@ def get_model(model_name: Optional[str], model_params: ModelParams) -> 'Sequenti
     return model
 
 
-def create_precise_model(recurrent_units, dropout):
+def create_precise_model(recurrent_units, dropout, params = ListenerParams()):
     model = Sequential()
     model.add(GRU(
         recurrent_units, activation='linear',
