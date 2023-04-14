@@ -12,6 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import datetime
 import os
 import random
 import shutil
@@ -19,7 +20,6 @@ from math import exp
 from os.path import splitext, isfile
 from pprint import pprint
 from typing import Tuple
-import datetime
 
 import numpy as np
 import tensorflow as tf  # Using tensorflow v2.2
@@ -148,9 +148,9 @@ class PreciseTrainer:
             if backend == "mixture":
                 bb.run_backend("mixture", [
                     #    ("tree_structured_parzen_estimator", 1),
-                   # ("annealing", 1),
+                    # ("annealing", 1),
                     ("gaussian_process", 1),
-                   #  ("random_forest", 1),
+                    #  ("random_forest", 1),
                     #   ("extra_trees", 1),
                     ("gradient_boosted_regression_trees", 1),
                 ])
@@ -241,10 +241,6 @@ class PreciseTrainer:
                 dst = f"{self.data_folder}/not-wake-word/{f.split('/')[-1]}"
                 print(f"adding {f} to training data -> {dst}")
                 shutil.move(f, dst)
-            for f in fn_files:
-                dst = f"{self.data_folder}/wake-word/{f.split('/')[-1]}"
-                print(f"adding {f} to training data -> {dst}")
-                shutil.move(f, dst)
             # reload training data
             self.train_data, self.test_data = self.load_data(folder, no_validation)
 
@@ -268,7 +264,7 @@ class PreciseTrainer:
         y = []
 
         if balanced:
-            s1 = s2 = int((len(neg_samples + pos_samples) * porportion)/2)
+            s1 = s2 = int((len(neg_samples + pos_samples) * porportion) / 2)
         else:
             s1 = int(len(pos_samples) * porportion)
             s2 = int(len(neg_samples) * porportion)
@@ -309,9 +305,7 @@ class PreciseTrainer:
         self.model.summary()
 
         for i in range(self.train_epochs):
-            fp_files, fn_files = [], []
-            train_inputs, train_outputs = self._replace(porportion, balanced,
-                                                        fp_files, fn_files)
+            train_inputs, train_outputs = self._replace(porportion, balanced)
             self.model.fit(
                 train_inputs, train_outputs, self.batch_size,
                 self.epoch + mini_epochs, validation_data=self.test_data,
@@ -327,13 +321,80 @@ class PreciseTrainer:
                 dst = f"{self.data_folder}/not-wake-word/{f.split('/')[-1]}"
                 print(f"adding {f} to training data -> {dst}")
                 shutil.move(f, dst)
-            for f in fn_files:
-                dst = f"{self.data_folder}/wake-word/{f.split('/')[-1]}"
-                print(f"adding {f} to training data -> {dst}")
-                shutil.move(f, dst)
             # reload training data
             self.train_data, self.test_data = self.load_data(folder, no_validation)
 
+        if convert:
+            return self.convert(self.path, f"{self.path}/model.tflite")
+        else:
+            self.model.save(self.path + ".h5")
+            return self.path + ".h5"
+
+    def train_optimized_with_replacement(self, trials_name=".cache/trials", cycles=50, porportion=0.4, balanced=True,
+                                         loss_bias=0.8, convert=True, backend="mixture"):
+        from bbopt import BlackBoxOptimizer
+        bb = BlackBoxOptimizer(file=trials_name)
+        print('Writing to:', trials_name + '.bbopt.json')
+        for i in range(cycles):
+            if backend == "mixture":
+                bb.run_backend("mixture", [
+                    #    ("tree_structured_parzen_estimator", 1),
+                    # ("annealing", 1),
+                    ("gaussian_process", 1),
+                    #  ("random_forest", 1),
+                    #   ("extra_trees", 1),
+                    ("gradient_boosted_regression_trees", 1),
+                ])
+            else:
+                bb.run(backend)
+
+            print("\n= %d = (example #%d)" % (i + 1, len(bb.get_data()["examples"]) + 1))
+
+            params = ModelParams(
+                recurrent_units=bb.randint("units", 1, 70, guess=50),
+                dropout=bb.uniform("dropout", 0.1, 0.9, guess=0.6),
+                extra_metrics=self.extra_metrics,
+                skip_acc=self.no_validation,
+                loss_bias=loss_bias
+            )
+            print('Testing with:', params)
+            model = get_model(self.path, params)
+            train_inputs, train_outputs = self._replace(porportion, balanced)
+            model.fit(train_inputs, train_outputs, batch_size=self.batch_size,
+                      epochs=self.epoch + self.train_epochs,
+                      validation_data=self.test_data * (not self.no_validation),
+                      callbacks=self.callbacks, initial_epoch=self.epoch
+                      )
+            resp = model.evaluate(*self.test_data, batch_size=self.batch_size)
+            if not isinstance(resp, (list, tuple)):
+                resp = [resp, None]
+            test_loss, test_acc = resp
+            predictions = model.predict(self.test_data[0], batch_size=self.batch_size)
+
+            num_false_positive = np.sum(predictions * (1 - self.test_data[1]) > 0.5)
+            num_false_negative = np.sum((1 - predictions) * self.test_data[1] > 0.5)
+            false_positives = num_false_positive / np.sum(self.test_data[1] < 0.5)
+            false_negatives = num_false_negative / np.sum(self.test_data[1] > 0.5)
+
+            param_score = 1.0 / (1.0 + exp((model.count_params() - 11000) / 2000))
+            fitness = param_score * (1.0 - 0.2 * false_negatives - 0.8 * false_positives)
+
+            bb.remember({
+                "test loss": test_loss,
+                "test accuracy": test_acc,
+                "false positive%": false_positives,
+                "false negative%": false_negatives,
+                "fitness": fitness
+            })
+
+            print("False positive: ", false_positives * 100, "%")
+
+            bb.maximize(fitness)
+            pprint(bb.get_current_run())
+
+        best = bb.get_optimal_run()
+        print("\n= BEST = (example #%d)" % bb.get_data()["examples"].index(best))
+        pprint(best)
         if convert:
             return self.convert(self.path, f"{self.path}/model.tflite")
         else:
@@ -403,7 +464,6 @@ class PreciseTrainer:
 
 
 if __name__ == "__main__":
-
     """
     :-s --sensitivity float 0.2
         Weighted loss bias. Higher values decrease increase positives
@@ -425,16 +485,16 @@ if __name__ == "__main__":
 
     params = ModelParams(skip_acc=no_validation, extra_metrics=extra_metrics,
                          loss_bias=1.0 - sensitivity, freeze_till=freeze_till)
-    model_name = "lazarus"
+    model_name = "hey_computer"
     folder = f"/tmp/{model_name}"
     model_path = f"/home/miro/PycharmProjects/ovos-audio-classifiers/trained/{model_name}"
     log_dir = f"logs/fit/{model_name}/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
-    trainer = PreciseTrainer(model_path, folder, epochs=200, log_dir=log_dir)
-    model_file = trainer.train_incremental()
+    trainer = PreciseTrainer(model_path, folder, epochs=100, log_dir=log_dir)
+    model_file = trainer.train_optimized_with_replacement()
     # look for best hyperparams during a few cycles
     # model_file = trainer.train_optimized(cycles=20)
     # train the best model for more epochs
-    #trainer.train_epochs = 5000
-    #model_file = trainer.train()
+    # trainer.train_epochs = 5000
+    # model_file = trainer.train()
     trainer.test(model_file, folder)
