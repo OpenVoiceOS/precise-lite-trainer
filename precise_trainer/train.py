@@ -210,12 +210,12 @@ class PreciseTrainer:
             self.model.save(self.path + ".h5")
             return self.path + ".h5"
 
-    def _get_failed_filenames(self, use_train=False, threshold=0.5):
-
+    def _get_failed_filenames(self, model=None, use_train=False, threshold=0.5):
+        model = model or self.model
         inputs, targets = self.train_data if use_train else self.test_data
         filenames = sum(self.data.train_files if use_train else self.data.test_files, [])
 
-        predictions = self.model.predict(inputs)
+        predictions = model.predict(inputs)
         stats = Stats(predictions, targets, filenames)
         fp_files = stats.calc_filenames(False, True, threshold)
         fn_files = stats.calc_filenames(False, False, threshold)
@@ -282,7 +282,7 @@ class PreciseTrainer:
 
         return np.array(X), np.array(y)
 
-    def train_with_replacement(self, mini_epochs=50, porportion=0.4, balanced=True, convert=True):
+    def train_with_replacement(self, mini_epochs=20, porportion=0.4, balanced=True, convert=True):
         self.model.summary()
 
         for i in range(self.train_epochs):
@@ -391,6 +391,86 @@ class PreciseTrainer:
 
             bb.maximize(fitness)
             pprint(bb.get_current_run())
+
+        best = bb.get_optimal_run()
+        print("\n= BEST = (example #%d)" % bb.get_data()["examples"].index(best))
+        pprint(best)
+        if convert:
+            return self.convert(self.path, f"{self.path}/model.tflite")
+        else:
+            self.model.save(self.path + ".h5")
+            return self.path + ".h5"
+
+    def train_optimized_incremental(self, trials_name=".cache/trials", cycles=50, porportion=0.4, balanced=True,
+                                         loss_bias=0.8, convert=True, backend="mixture"):
+        from bbopt import BlackBoxOptimizer
+        bb = BlackBoxOptimizer(file=trials_name)
+        print('Writing to:', trials_name + '.bbopt.json')
+        for i in range(cycles):
+            if backend == "mixture":
+                bb.run_backend("mixture", [
+                    #    ("tree_structured_parzen_estimator", 1),
+                    # ("annealing", 1),
+                    ("gaussian_process", 1),
+                    #  ("random_forest", 1),
+                    #   ("extra_trees", 1),
+                    ("gradient_boosted_regression_trees", 1),
+                ])
+            else:
+                bb.run(backend)
+
+            print("\n= %d = (example #%d)" % (i + 1, len(bb.get_data()["examples"]) + 1))
+
+            params = ModelParams(
+                recurrent_units=bb.randint("units", 1, 70, guess=50),
+                dropout=bb.uniform("dropout", 0.1, 0.9, guess=0.6),
+                extra_metrics=self.extra_metrics,
+                skip_acc=self.no_validation,
+                loss_bias=loss_bias
+            )
+            print('Testing with:', params)
+            model = get_model(self.path, params)
+            train_inputs, train_outputs = self._replace(porportion, balanced)
+            model.fit(train_inputs, train_outputs, batch_size=self.batch_size,
+                      epochs=self.epoch + self.train_epochs,
+                      validation_data=self.test_data * (not self.no_validation),
+                      callbacks=self.callbacks, initial_epoch=self.epoch
+                      )
+            resp = model.evaluate(*self.test_data, batch_size=self.batch_size)
+            if not isinstance(resp, (list, tuple)):
+                resp = [resp, None]
+            test_loss, test_acc = resp
+            predictions = model.predict(self.test_data[0], batch_size=self.batch_size)
+
+            num_false_positive = np.sum(predictions * (1 - self.test_data[1]) > 0.5)
+            num_false_negative = np.sum((1 - predictions) * self.test_data[1] > 0.5)
+            false_positives = num_false_positive / np.sum(self.test_data[1] < 0.5)
+            false_negatives = num_false_negative / np.sum(self.test_data[1] > 0.5)
+
+            param_score = 1.0 / (1.0 + exp((model.count_params() - 11000) / 2000))
+            fitness = param_score * (1.0 - 0.2 * false_negatives - 0.8 * false_positives)
+
+            bb.remember({
+                "test loss": test_loss,
+                "test accuracy": test_acc,
+                "false positive%": false_positives,
+                "false negative%": false_negatives,
+                "fitness": fitness
+            })
+
+            print("False positive: ", false_positives * 100, "%")
+
+            bb.maximize(fitness)
+            pprint(bb.get_current_run())
+
+            # add wrong classifications to training data
+            fp_files, fn_files = self._get_failed_filenames(model)
+            for f in fp_files:
+                dst = f"{self.data_folder}/not-wake-word/{f.split('/')[-1]}"
+                print(f"adding {f} to training data -> {dst}")
+                shutil.move(f, dst)
+            # reload training data
+            self.train_data, self.test_data = self.load_data(folder, no_validation)
 
         best = bb.get_optimal_run()
         print("\n= BEST = (example #%d)" % bb.get_data()["examples"].index(best))
