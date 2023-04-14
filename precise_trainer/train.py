@@ -14,6 +14,7 @@
 # limitations under the License.
 import os
 import random
+import shutil
 from math import exp
 from os.path import splitext, isfile
 from pprint import pprint
@@ -74,6 +75,7 @@ class PreciseTrainer:
         self.model = get_model(model, model_params)
         self.no_validation = no_validation
         self.extra_metrics = extra_metrics
+        self.data_folder = folder
         self.train_data, self.test_data = self.load_data(folder, no_validation)
 
         checkpoint = ModelCheckpoint(model, monitor=metric_monitor, save_best_only=save_best)
@@ -99,11 +101,10 @@ class PreciseTrainer:
             TensorBoard(log_dir=log_dir, histogram_freq=1)
         ]
 
-    @staticmethod
-    def load_data(folder, no_validation=False) -> Tuple[tuple, tuple]:
-        data = TrainData.from_folder(folder)
-        print('Data:', data)
-        train, test = data.load(True, not no_validation)
+    def load_data(self, folder, no_validation=False) -> Tuple[tuple, tuple]:
+        self.data = TrainData.from_folder(folder)
+        print('Data:', self.data)
+        train, test = self.data.load(True, not no_validation)
 
         print('Inputs shape:', train[0].shape)
         print('Outputs shape:', train[1].shape)
@@ -133,57 +134,6 @@ class PreciseTrainer:
             use_multiprocessing=True, validation_freq=5,
             verbose=1
         )
-        if convert:
-            return self.convert(self.path, f"{self.path}/model.tflite")
-        else:
-            self.model.save(self.path + ".h5")
-            return self.path + ".h5"
-
-    def _replace(self, porportion=0.4, balanced=True):
-        pos_samples = []
-        neg_samples = []
-        for idx, x in enumerate(self.train_data[0]):
-            y = self.train_data[1][idx]
-            if y[0]:
-                pos_samples.append((x, y))
-            else:
-                neg_samples.append((x, y))
-
-        X = []
-        y = []
-
-        if balanced:
-            s1 = s2 = int((len(neg_samples + pos_samples) * porportion)/2)
-        else:
-            s1 = int(len(pos_samples) * porportion)
-            s2 = int(len(neg_samples) * porportion)
-
-        # randomly sample data points
-        while len(X) < s1:
-            ns = random.choice(pos_samples)
-            X.append(ns[0])
-            y.append(ns[1])
-
-        while len(X) < s1 + s2:
-            ns = random.choice(neg_samples)
-            X.append(ns[0])
-            y.append(ns[1])
-
-        return np.array(X), np.array(y)
-
-    def train_with_replacement(self, mini_epochs=5, porportion=0.4, balanced=True, convert=True):
-        self.model.summary()
-
-        for i in range(self.train_epochs):
-            train_inputs, train_outputs = self._replace(porportion, balanced)
-            self.model.fit(
-                train_inputs, train_outputs, self.batch_size,
-                self.epoch + mini_epochs, validation_data=self.test_data,
-                initial_epoch=self.epoch, callbacks=self.callbacks,
-                use_multiprocessing=True, validation_freq=5,
-                verbose=1
-            )
-            self.epoch += mini_epochs
         if convert:
             return self.convert(self.path, f"{self.path}/model.tflite")
         else:
@@ -254,6 +204,136 @@ class PreciseTrainer:
         best = bb.get_optimal_run()
         print("\n= BEST = (example #%d)" % bb.get_data()["examples"].index(best))
         pprint(best)
+        if convert:
+            return self.convert(self.path, f"{self.path}/model.tflite")
+        else:
+            self.model.save(self.path + ".h5")
+            return self.path + ".h5"
+
+    def _get_failed_filenames(self, use_train=False, threshold=0.5):
+
+        inputs, targets = self.train_data if use_train else self.test_data
+        filenames = sum(self.data.train_files if use_train else self.data.test_files, [])
+
+        predictions = self.model.predict(inputs)
+        stats = Stats(predictions, targets, filenames)
+        fp_files = stats.calc_filenames(False, True, threshold)
+        fn_files = stats.calc_filenames(False, False, threshold)
+        return fp_files, fn_files
+
+    def train_incremental(self, mini_epochs=15, convert=True):
+        self.model.summary()
+
+        for i in range(self.train_epochs):
+            train_inputs, train_outputs = self.sampled_data
+            self.model.fit(
+                train_inputs, train_outputs, self.batch_size,
+                self.epoch + mini_epochs, validation_data=self.test_data,
+                initial_epoch=self.epoch, callbacks=self.callbacks,
+                use_multiprocessing=True, validation_freq=5,
+                verbose=1
+            )
+            self.epoch += mini_epochs
+
+            # add wrong classifications to training data
+            fp_files, fn_files = self._get_failed_filenames()
+            for f in fp_files:
+                dst = f"{self.data_folder}/not-wake-word/{f.split('/')[-1]}"
+                print(f"adding {f} to training data -> {dst}")
+                shutil.move(f, dst)
+            for f in fn_files:
+                dst = f"{self.data_folder}/wake-word/{f.split('/')[-1]}"
+                print(f"adding {f} to training data -> {dst}")
+                shutil.move(f, dst)
+            # reload training data
+            self.train_data, self.test_data = self.load_data(folder, no_validation)
+
+        if convert:
+            return self.convert(self.path, f"{self.path}/model.tflite")
+        else:
+            self.model.save(self.path + ".h5")
+            return self.path + ".h5"
+
+    def _replace(self, porportion=0.4, balanced=True, fp_files=None, fn_files=None):
+        pos_samples = []
+        neg_samples = []
+        for idx, x in enumerate(self.train_data[0]):
+            y = self.train_data[1][idx]
+            if y[0]:
+                pos_samples.append((x, y))
+            else:
+                neg_samples.append((x, y))
+
+        X = []
+        y = []
+
+        if balanced:
+            s1 = s2 = int((len(neg_samples + pos_samples) * porportion)/2)
+        else:
+            s1 = int(len(pos_samples) * porportion)
+            s2 = int(len(neg_samples) * porportion)
+
+        # randomly sample data points
+        while len(X) < s1:
+            ns = random.choice(pos_samples)
+            X.append(ns[0])
+            y.append(ns[1])
+
+        while len(X) < s1 + s2:
+            ns = random.choice(neg_samples)
+            X.append(ns[0])
+            y.append(ns[1])
+
+        return np.array(X), np.array(y)
+
+    def train_with_replacement(self, mini_epochs=50, porportion=0.4, balanced=True, convert=True):
+        self.model.summary()
+
+        for i in range(self.train_epochs):
+            train_inputs, train_outputs = self._replace(porportion, balanced)
+            self.model.fit(
+                train_inputs, train_outputs, self.batch_size,
+                self.epoch + mini_epochs, validation_data=self.test_data,
+                initial_epoch=self.epoch, callbacks=self.callbacks,
+                use_multiprocessing=True, validation_freq=5,
+                verbose=1
+            )
+            self.epoch += mini_epochs
+        if convert:
+            return self.convert(self.path, f"{self.path}/model.tflite")
+        else:
+            self.model.save(self.path + ".h5")
+            return self.path + ".h5"
+
+    def train_incremental_with_replacement(self, mini_epochs=15, porportion=0.4, balanced=True, convert=True):
+        self.model.summary()
+
+        for i in range(self.train_epochs):
+            fp_files, fn_files = [], []
+            train_inputs, train_outputs = self._replace(porportion, balanced,
+                                                        fp_files, fn_files)
+            self.model.fit(
+                train_inputs, train_outputs, self.batch_size,
+                self.epoch + mini_epochs, validation_data=self.test_data,
+                initial_epoch=self.epoch, callbacks=self.callbacks,
+                use_multiprocessing=True, validation_freq=5,
+                verbose=1
+            )
+            self.epoch += mini_epochs
+
+            # add wrong classifications to training data
+            fp_files, fn_files = self._get_failed_filenames()
+            for f in fp_files:
+                dst = f"{self.data_folder}/not-wake-word/{f.split('/')[-1]}"
+                print(f"adding {f} to training data -> {dst}")
+                shutil.move(f, dst)
+            for f in fn_files:
+                dst = f"{self.data_folder}/wake-word/{f.split('/')[-1]}"
+                print(f"adding {f} to training data -> {dst}")
+                shutil.move(f, dst)
+            # reload training data
+            self.train_data, self.test_data = self.load_data(folder, no_validation)
+
         if convert:
             return self.convert(self.path, f"{self.path}/model.tflite")
         else:
@@ -345,13 +425,13 @@ if __name__ == "__main__":
 
     params = ModelParams(skip_acc=no_validation, extra_metrics=extra_metrics,
                          loss_bias=1.0 - sensitivity, freeze_till=freeze_till)
-    model_name = "hey_chatterbox"
+    model_name = "lazarus"
     folder = f"/tmp/{model_name}"
     model_path = f"/home/miro/PycharmProjects/ovos-audio-classifiers/trained/{model_name}"
     log_dir = f"logs/fit/{model_name}/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
     trainer = PreciseTrainer(model_path, folder, epochs=200, log_dir=log_dir)
-    model_file = trainer.train_with_replacement()
+    model_file = trainer.train_incremental()
     # look for best hyperparams during a few cycles
     # model_file = trainer.train_optimized(cycles=20)
     # train the best model for more epochs
