@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
+import random
 from math import exp
 from os.path import splitext, isfile
 from pprint import pprint
@@ -132,6 +133,57 @@ class PreciseTrainer:
             use_multiprocessing=True, validation_freq=5,
             verbose=1
         )
+        if convert:
+            return self.convert(self.path, f"{self.path}/model.tflite")
+        else:
+            self.model.save(self.path + ".h5")
+            return self.path + ".h5"
+
+    def _replace(self, porportion=0.4, balanced=True):
+        pos_samples = []
+        neg_samples = []
+        for idx, x in enumerate(self.train_data[0]):
+            y = self.train_data[1][idx]
+            if y[0]:
+                pos_samples.append((x, y))
+            else:
+                neg_samples.append((x, y))
+
+        X = []
+        y = []
+
+        if balanced:
+            s1 = s2 = int((len(neg_samples + pos_samples) * porportion)/2)
+        else:
+            s1 = int(len(pos_samples) * porportion)
+            s2 = int(len(neg_samples) * porportion)
+
+        # randomly sample data points
+        while len(X) < s1:
+            ns = random.choice(pos_samples)
+            X.append(ns[0])
+            y.append(ns[1])
+
+        while len(X) < s1 + s2:
+            ns = random.choice(neg_samples)
+            X.append(ns[0])
+            y.append(ns[1])
+
+        return np.array(X), np.array(y)
+
+    def train_with_replacement(self, mini_epochs=5, porportion=0.4, balanced=True, convert=True):
+        self.model.summary()
+
+        for i in range(self.train_epochs):
+            train_inputs, train_outputs = self._replace(porportion, balanced)
+            self.model.fit(
+                train_inputs, train_outputs, self.batch_size,
+                self.epoch + mini_epochs, validation_data=self.test_data,
+                initial_epoch=self.epoch, callbacks=self.callbacks,
+                use_multiprocessing=True, validation_freq=5,
+                verbose=1
+            )
+            self.epoch += mini_epochs
         if convert:
             return self.convert(self.path, f"{self.path}/model.tflite")
         else:
@@ -290,19 +342,19 @@ if __name__ == "__main__":
     no_validation = False
     freeze_till = 0
     sensitivity = 0.2
-    if not 0.0 <= sensitivity <= 1.0:
-        raise ValueError('sensitivity must be between 0.0 and 1.0')
+
     params = ModelParams(skip_acc=no_validation, extra_metrics=extra_metrics,
                          loss_bias=1.0 - sensitivity, freeze_till=freeze_till)
-    model_name = "male_ww"
-    folder = "/tmp/male_ww"
+    model_name = "hey_chatterbox"
+    folder = f"/tmp/{model_name}"
     model_path = f"/home/miro/PycharmProjects/ovos-audio-classifiers/trained/{model_name}"
     log_dir = f"logs/fit/{model_name}/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
-    trainer = PreciseTrainer(model_path, folder, epochs=100, log_dir=log_dir)
+    trainer = PreciseTrainer(model_path, folder, epochs=200, log_dir=log_dir)
+    model_file = trainer.train_with_replacement()
     # look for best hyperparams during a few cycles
     # model_file = trainer.train_optimized(cycles=20)
     # train the best model for more epochs
     #trainer.train_epochs = 5000
-    model_file = trainer.train()
+    #model_file = trainer.train()
     trainer.test(model_file, folder)
