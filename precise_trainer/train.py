@@ -62,7 +62,7 @@ class PreciseTrainer:
     """
 
     def __init__(self, model, folder, model_params=None, epochs=50, batch_size=512,
-                 save_best=True, no_validation=False, metric_monitor="loss",
+                 save_best=True, no_validation=False, metric_monitor="loss", extra_metrics=False,
                  log_dir="logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
                  ):
 
@@ -242,7 +242,7 @@ class PreciseTrainer:
                 print(f"adding {f} to training data -> {dst}")
                 shutil.move(f, dst)
             # reload training data
-            self.train_data, self.test_data = self.load_data(folder, no_validation)
+            self.train_data, self.test_data = self.load_data(self.data_folder)
 
         if convert:
             return self.convert(self.path, f"{self.path}/model.tflite")
@@ -322,7 +322,7 @@ class PreciseTrainer:
                 print(f"adding {f} to training data -> {dst}")
                 shutil.move(f, dst)
             # reload training data
-            self.train_data, self.test_data = self.load_data(folder, no_validation)
+            self.train_data, self.test_data = self.load_data(self.data_folder)
 
         if convert:
             return self.convert(self.path, f"{self.path}/model.tflite")
@@ -470,7 +470,7 @@ class PreciseTrainer:
                 print(f"adding {f} to training data -> {dst}")
                 shutil.move(f, dst)
             # reload training data
-            self.train_data, self.test_data = self.load_data(folder, no_validation)
+            self.train_data, self.test_data = self.load_data(self.data_folder)
 
         best = bb.get_optimal_run()
         print("\n= BEST = (example #%d)" % bb.get_data()["examples"].index(best))
@@ -482,7 +482,7 @@ class PreciseTrainer:
             return self.path + ".h5"
 
     @staticmethod
-    def test(model, folder, use_train=False, threshold=0.5, no_filenames=False):
+    def test_from_file(model, folder, use_train=False, threshold=0.5, no_filenames=False):
         print(model)
         data = TrainData.from_folder(folder)
         train, test = data.load(use_train, not use_train, shuffle=False)
@@ -505,6 +505,22 @@ class PreciseTrainer:
             print()
         print(stats.counts_str(threshold))
         print()
+        print(stats.summary_str(threshold))
+
+    def test(self, use_train=False, threshold=0.5, no_filenames=True):
+        inputs, targets = self.train_data if use_train else self.test_data
+        filenames = sum(self.data.train_files if use_train else self.data.test_files, [])
+        predictions = self.model.predict(inputs)
+        stats = Stats(predictions, targets, filenames)
+
+        if not no_filenames:
+            fp_files = stats.calc_filenames(False, True, threshold)
+            fn_files = stats.calc_filenames(False, False, threshold)
+            print('=== False Positives ===')
+            print('\n'.join(fp_files))
+            print('=== False Negatives ===')
+            print('\n'.join(fn_files))
+        print(stats.counts_str(threshold))
         print(stats.summary_str(threshold))
 
     @staticmethod
@@ -556,25 +572,57 @@ if __name__ == "__main__":
         Can be negative to wrap from end
     """
 
-    # PreciseTrainer.convert(intput, output)
+    from precise_trainer import PreciseTrainer
+    from precise_trainer.model import ModelParams
 
-    extra_metrics = False
-    no_validation = False
-    freeze_till = 0
-    sensitivity = 0.2
-
-    params = ModelParams(skip_acc=no_validation, extra_metrics=extra_metrics,
-                         loss_bias=1.0 - sensitivity, freeze_till=freeze_till)
     model_name = "hey_computer"
-    folder = f"/tmp/{model_name}"
-    model_path = f"/home/miro/PycharmProjects/ovos-audio-classifiers/trained/{model_name}"
-    log_dir = f"logs/fit/{model_name}/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    folder = f"/tmp/{model_name}"  # dataset here
+    model_path = f"/home/miro/PycharmProjects/ovos-audio-classifiers/trained/{model_name}"  # save here
+    log_dir = f"logs/fit/{model_name}"  # for tensorboard
 
+    # train a model
     trainer = PreciseTrainer(model_path, folder, epochs=100, log_dir=log_dir)
-    model_file = trainer.train_optimized_with_replacement()
-    # look for best hyperparams during a few cycles
-    # model_file = trainer.train_optimized(cycles=20)
-    # train the best model for more epochs
-    # trainer.train_epochs = 5000
-    # model_file = trainer.train()
-    trainer.test(model_file, folder)
+    model_file = trainer.train_incremental()
+    # Data: <TrainData wake_words=155 not_wake_words=89356 test_wake_words=39 test_not_wake_words=22339>
+    # Loading wake-word...
+    # Loading not-wake-word...
+    # Loading wake-word...
+    # Loading not-wake-word...
+    # Inputs shape: (81602, 29, 13)
+    # Outputs shape: (81602, 1)
+    # Test inputs shape: (20486, 29, 13)
+    # Test outputs shape: (20486, 1)
+    # Model: "sequential"
+    # _________________________________________________________________
+    #  Layer (type)                Output Shape              Param #
+    # =================================================================
+    #  net (GRU)                   (None, 20)                2100
+    #
+    #  dense (Dense)               (None, 1)                 21
+    #
+    # =================================================================
+    # Total params: 2,121
+    # Trainable params: 2,121
+    # Non-trainable params: 0
+    # .....
+    # _________________________________________________________________
+    # Epoch 1280/1379
+    # 157/160 [============================>.] - ETA: 0s - loss: 0.0308 - accuracy: 0.9868
+    # ....
+    # Wrote to /home/miro/PycharmProjects/ovos-audio-classifiers/trained/hey_computer/model.tflite
+    trainer.test()
+
+    # === Counts ===
+    # False Positives: 2
+    # True Negatives: 20445
+    # False Negatives: 2
+    # True Positives: 37
+    #
+    # === Summary ===
+    # 20482 out of 20486
+    # 99.98%
+    #
+    # 0.01% false positives
+    # 5.13% false negatives
+
+
