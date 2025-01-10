@@ -1,17 +1,14 @@
 # OpenVoiceOS precise trainer
 
-WIP - open during construction, setup.py and command line entry points are not yet provided
+### Model Architecture
 
-Several training strategies are available, each may provide better results for different datasets and wake words, some sounds might be easier to learn than others and the kinds of data available for each word will be different
+The wake word detection model is designed to be lightweight and efficient, suitable for real-time applications. It processes audio features using a simple architecture:
 
-- train - select epochs, batch size and go!
-- train with replacement - use a different subset of the training data in every epoch, helps avoid overfitting
-- train incremental - every epoch test the model and move false positives to training set, helps if you have an unbalanced dataset (a lot not-ww samples)
-- train incremental with replacement - unbalanced dataset + overfitting to specific voices
-- train optimized - using [bbopt](https://github.com/evhub/bbopt) search the optimal hyperparams (dropout and recurrent units), train several models and keep best one
-- train optimized incremental
-- train optimized with replacement
+1. **Recurrent Layer**: A GRU layer captures temporal patterns in audio, enabling the model to understand sequential dependencies.
+2. **Output Layer**: A fully connected layer with a sigmoid activation outputs the probability of the wake word being present.
+3. **Custom Loss and Metrics**: The model uses a weighted loss function to balance sensitivity and specificity, with metrics like accuracy, false positives, and false negatives for detailed evaluation.
 
+This streamlined design ensures robust performance with low computational overhead, making it ideal for resource-constrained environments.
 
 # Converting / Testing
 
@@ -29,6 +26,19 @@ PreciseTrainer.test_from_file(model_file, folder)
 ```
 
 # Training
+
+Several training strategies are available, each may provide better results for different datasets and wake words, some sounds might be easier to learn than others and the kinds of data available for each word will be different
+
+| Strategy                              | Description                                                                                   |
+|---------------------------------------|-----------------------------------------------------------------------------------------------|
+| `train`                               | Standard training with selected epochs and batch size.                                        |
+| `train_with_replacement`              | Avoid overfitting by replacing the training subset every epoch.                               |
+| `train_incremental`                   | Add false positives from testing set to training set, useful for unbalanced datasets.         |
+| `train_incremental_with_replacement`  | Combines incremental training with replacement for more robust models.                        |
+| `train_optimized`                     | Searches for optimal hyperparameters using `bbopt` and keeps the best model.                 |
+| `train_optimized_incremental`         | Combines incremental training with hyperparameter optimization.                               |
+| `train_optimized_with_replacement`    | Combines optimized training with replacement to reduce overfitting and improve robustness.    |
+
 
 ```
 from precise_trainer import PreciseTrainer

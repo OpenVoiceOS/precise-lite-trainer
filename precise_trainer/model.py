@@ -15,8 +15,8 @@ from dataclasses import dataclass
 from os.path import isfile
 from typing import *
 
-from keras.layers import Dense, GRU
-from keras.models import Sequential, load_model
+from tensorflow.keras.layers import Dense, GRU
+from tensorflow.keras.models import Sequential, load_model
 from precise_lite_runner.params import ListenerParams
 
 from precise_trainer.functions import false_pos, false_neg, \

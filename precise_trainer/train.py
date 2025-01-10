@@ -21,14 +21,16 @@ from os.path import splitext, isfile
 from pprint import pprint
 from typing import Tuple
 
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Disable GPU usage
+
 import numpy as np
 import tensorflow as tf  # Using tensorflow v2.2
-from keras.callbacks import LambdaCallback, ModelCheckpoint, TensorBoard
-from keras.models import load_model
+from tensorflow.keras.callbacks import LambdaCallback, ModelCheckpoint, TensorBoard
+from tensorflow.keras.models import load_model
 from precise_lite_runner.runner import TFLiteRunner
 
 from precise_trainer.functions import weighted_log_loss
-from precise_trainer.model import get_model, ModelParams
+from precise_trainer.model import get_model
 from precise_trainer.stats import Stats
 from precise_trainer.train_data import TrainData
 
@@ -402,7 +404,7 @@ class PreciseTrainer:
             return self.path + ".h5"
 
     def train_optimized_incremental(self, trials_name=".cache/trials", cycles=50, porportion=0.4, balanced=True,
-                                         loss_bias=0.8, convert=True, backend="mixture"):
+                                    loss_bias=0.8, convert=True, backend="mixture"):
         from bbopt import BlackBoxOptimizer
         bb = BlackBoxOptimizer(file=trials_name)
         print('Writing to:', trials_name + '.bbopt.json')
@@ -624,5 +626,3 @@ if __name__ == "__main__":
     #
     # 0.01% false positives
     # 5.13% false negatives
-
-

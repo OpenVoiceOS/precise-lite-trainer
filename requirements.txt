@@ -2,5 +2,5 @@ precise-lite-runner
 tensorflow
 bbopt==1.0
 wavio
-Keras
 pyache
+click
