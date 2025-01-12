@@ -14,6 +14,7 @@
 from math import exp, log, sqrt, pi
 from typing import *
 
+from tensorflow.keras.saving import register_keras_serializable
 import numpy as np
 
 LOSS_BIAS = 0.9  # [0..1] where 1 is inf bias
@@ -27,7 +28,7 @@ def set_loss_bias(bias: float):
     global LOSS_BIAS
     LOSS_BIAS = bias
 
-
+@register_keras_serializable(package="Custom")
 def weighted_log_loss(yt, yp) -> Any:
     """
     Binary crossentropy with a bias towards false negatives
@@ -41,7 +42,7 @@ def weighted_log_loss(yt, yp) -> Any:
 
     return LOSS_BIAS * K.mean(neg_loss) + (1. - LOSS_BIAS) * K.mean(pos_loss)
 
-
+@register_keras_serializable(package="Custom")
 def weighted_mse_loss(yt, yp) -> Any:
     import tensorflow.keras.backend as K
 

@@ -29,6 +29,7 @@ from tensorflow.keras.callbacks import LambdaCallback, ModelCheckpoint, TensorBo
 from tensorflow.keras.models import load_model
 from precise_lite_runner.runner import TFLiteRunner
 
+from precise_trainer.model import ModelParams
 from precise_trainer.functions import weighted_log_loss
 from precise_trainer.model import get_model
 from precise_trainer.stats import Stats
@@ -133,8 +134,7 @@ class PreciseTrainer:
             train_inputs, train_outputs, self.batch_size,
             self.epoch + self.train_epochs, validation_data=self.test_data,
             initial_epoch=self.epoch, callbacks=self.callbacks,
-            use_multiprocessing=True, validation_freq=5,
-            verbose=1
+            validation_freq=5, verbose=1
         )
         if convert:
             return self.convert(self.path, f"{self.path}/model.tflite")
@@ -231,8 +231,7 @@ class PreciseTrainer:
             self.model.fit(
                 train_inputs, train_outputs, self.batch_size,
                 self.epoch + mini_epochs, validation_data=self.test_data,
-                initial_epoch=self.epoch, callbacks=self.callbacks,
-                use_multiprocessing=True, validation_freq=5,
+                initial_epoch=self.epoch, callbacks=self.callbacks, validation_freq=5,
                 verbose=1
             )
             self.epoch += mini_epochs
@@ -284,16 +283,17 @@ class PreciseTrainer:
 
         return np.array(X), np.array(y)
 
-    def train_with_replacement(self, mini_epochs=20, porportion=0.4, balanced=True, convert=True):
+    def train_with_replacement(self, mini_epochs=20, proportion=0.4, balanced=True, convert=True):
         self.model.summary()
 
         for i in range(self.train_epochs):
-            train_inputs, train_outputs = self._replace(porportion, balanced)
+            train_inputs, train_outputs = self._replace(proportion, balanced)
+            print(f"Training with {len(train_inputs)} samples for {mini_epochs} mini-epochs")
             self.model.fit(
                 train_inputs, train_outputs, self.batch_size,
                 self.epoch + mini_epochs, validation_data=self.test_data,
                 initial_epoch=self.epoch, callbacks=self.callbacks,
-                use_multiprocessing=True, validation_freq=5,
+                validation_freq=5,
                 verbose=1
             )
             self.epoch += mini_epochs
@@ -303,16 +303,17 @@ class PreciseTrainer:
             self.model.save(self.path + ".h5")
             return self.path + ".h5"
 
-    def train_incremental_with_replacement(self, mini_epochs=15, porportion=0.4, balanced=True, convert=True):
+    def train_incremental_with_replacement(self, mini_epochs=20, proportion=0.5, balanced=True, convert=True):
         self.model.summary()
 
         for i in range(self.train_epochs):
-            train_inputs, train_outputs = self._replace(porportion, balanced)
+            train_inputs, train_outputs = self._replace(proportion, balanced)
+            print(f"Training with {len(train_inputs)} samples for {mini_epochs} mini-epochs")
             self.model.fit(
                 train_inputs, train_outputs, self.batch_size,
                 self.epoch + mini_epochs, validation_data=self.test_data,
                 initial_epoch=self.epoch, callbacks=self.callbacks,
-                use_multiprocessing=True, validation_freq=5,
+                validation_freq=5,
                 verbose=1
             )
             self.epoch += mini_epochs
@@ -332,7 +333,7 @@ class PreciseTrainer:
             self.model.save(self.path + ".h5")
             return self.path + ".h5"
 
-    def train_optimized_with_replacement(self, trials_name=".cache/trials", cycles=50, porportion=0.4, balanced=True,
+    def train_optimized_with_replacement(self, trials_name=".cache/trials", cycles=50, proportion=0.4, balanced=True,
                                          loss_bias=0.8, convert=True, backend="mixture"):
         from bbopt import BlackBoxOptimizer
         bb = BlackBoxOptimizer(file=trials_name)
@@ -361,7 +362,8 @@ class PreciseTrainer:
             )
             print('Testing with:', params)
             model = get_model(self.path, params)
-            train_inputs, train_outputs = self._replace(porportion, balanced)
+            train_inputs, train_outputs = self._replace(proportion, balanced)
+            print(f"Training with {len(train_inputs)} samples for {cycles} cycles")
             model.fit(train_inputs, train_outputs, batch_size=self.batch_size,
                       epochs=self.epoch + self.train_epochs,
                       validation_data=self.test_data * (not self.no_validation),
@@ -433,6 +435,7 @@ class PreciseTrainer:
             print('Testing with:', params)
             model = get_model(self.path, params)
             train_inputs, train_outputs = self._replace(porportion, balanced)
+            print(f"Training with {len(train_inputs)} samples for {cycles} cycles")
             model.fit(train_inputs, train_outputs, batch_size=self.batch_size,
                       epochs=self.epoch + self.train_epochs,
                       validation_data=self.test_data * (not self.no_validation),
@@ -555,6 +558,7 @@ class PreciseTrainer:
         converter.experimental_new_converter = True
         converter.allow_custom_ops = True
         converter._experimental_default_to_single_batch_in_tensor_list_ops = True
+        converter.target_spec.supported_types = [tf.float32]  # Ensure float32 compatibility
         tflite_model = converter.convert()
         open(out_file, "wb").write(tflite_model)
         print('Wrote to ' + out_file)
@@ -574,17 +578,15 @@ if __name__ == "__main__":
         Can be negative to wrap from end
     """
 
-    from precise_trainer import PreciseTrainer
-    from precise_trainer.model import ModelParams
 
-    model_name = "hey_computer"
-    folder = f"/tmp/{model_name}"  # dataset here
-    model_path = f"/home/miro/PycharmProjects/ovos-audio-classifiers/trained/{model_name}"  # save here
-    log_dir = f"logs/fit/{model_name}"  # for tensorboard
+    model_name = "hey_mycroft"
+    folder = f"/home/miro/PycharmProjects/precise-lite-trainer/training/hey_mycroft"  # dataset here
+    model_path = f"/home/miro/PycharmProjects/precise-lite-trainer/work/{model_name}.keras"  # save here
+    log_dir = f"/home/miro/PycharmProjects/precise-lite-trainer/work"  # for tensorboard
 
     # train a model
     trainer = PreciseTrainer(model_path, folder, epochs=100, log_dir=log_dir)
-    model_file = trainer.train_incremental()
+    model_file = trainer.train_incremental_with_replacement()
     # Data: <TrainData wake_words=155 not_wake_words=89356 test_wake_words=39 test_not_wake_words=22339>
     # Loading wake-word...
     # Loading not-wake-word...
