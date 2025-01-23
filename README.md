@@ -10,6 +10,16 @@ The wake word detection model is designed to be lightweight and efficient, suita
 
 This streamlined design ensures robust performance with low computational overhead, making it ideal for resource-constrained environments.
 
+### Resources
+
+- [@SecretSauceAI Wake Word Data Collector](https://github.com/secretsauceai/wakeword-data-collector)
+- [@SecretSauceAI Wake Word Trainer](https://github.com/secretsauceai/precise-wakeword-model-maker)
+- [Synthetic Data Creation for Wake Words](https://github.com/OpenVoiceOS/ovos-ww-auto-synth-dataset)
+- [Helpful Wake Word Datasets](https://huggingface.co/collections/Jarbas/wake-word-datasets-672cc275fa4bddff9cf69c39)
+- [Architecture experiments from @MycroftAI](https://github.com/MycroftAI/mycroft-precise/wiki/Research)
+- [Original training guide from @MycroftAI](https://github.com/MycroftAI/mycroft-precise/wiki/Training-your-own-wake-word) , contains details about dataset format etc
+
+
 # Converting / Testing
 
 ```python
@@ -162,3 +172,10 @@ trainer.test()
 tensorboard should produce something like this
 
 ![](./train_optimized.png)
+
+
+# Credits
+
+[Precise](https://github.com/MycroftAI/mycroft-precise) was originally developed by @MycroftAI
+
+![image](https://github.com/user-attachments/assets/d68b9124-92fc-4e66-9e83-59ac10a72ea8)
