@@ -26,7 +26,7 @@ This streamlined design ensures robust performance with low computational overhe
 from precise_trainer import PreciseTrainer
 
 # convert a previous model
-model_file = ".../my_model"
+model_file = ".../my_model.keras"
 PreciseTrainer.convert(model_file, model_file + ".tflite")
 
 # test a previous model
@@ -34,6 +34,9 @@ model_file = ".../my_model.tflite"
 folder = f"/home/user/ww_datasets/my_dataset"  # dataset here
 PreciseTrainer.test_from_file(model_file, folder)
 ```
+
+⚠️ to convert old `.net` format precise models you need `tensorflow<=2.15.1` otherwise will get an error like this
+> ValueError: File format not supported: Keras 3 only supports V3 `.keras` files and legacy H5 format files (`.h5` extension). Note that the legacy SavedModel format is not supported by `load_model()` in Keras 3.
 
 # Training
 
