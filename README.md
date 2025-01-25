@@ -53,7 +53,7 @@ Several training strategies are available, each may provide better results for d
 | `train_optimized_with_replacement`    | Combines optimized training with replacement to reduce overfitting and improve robustness.    |
 
 
-```
+```python
 from precise_trainer import PreciseTrainer
 
 model_name = "hey_computer"
